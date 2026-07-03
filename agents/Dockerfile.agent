@@ -1,0 +1,23 @@
+FROM python:3.11-slim
+
+ARG AGENT_MODULE
+ARG AGENT_PORT
+
+WORKDIR /app
+
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+COPY shared /app/shared
+COPY agents /app/agents
+
+ENV PYTHONPATH=/app
+ENV AGENT_MODULE=${AGENT_MODULE}
+ENV METRICS_PORT=${AGENT_PORT}
+
+EXPOSE ${AGENT_PORT}
+
+HEALTHCHECK --interval=15s --timeout=3s --start-period=20s --retries=3 \
+    CMD python -c "import os, socket; socket.create_connection(('localhost', int(os.environ['METRICS_PORT'])), timeout=2.0)" || exit 1
+
+CMD ["sh", "-c", "python -m ${AGENT_MODULE}"]

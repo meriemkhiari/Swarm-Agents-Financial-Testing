@@ -1,0 +1,148 @@
+services:
+  redis:
+    image: redis:7.2-alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - swarm_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  agent_amount:
+    build:
+      context: .
+      dockerfile: agents/Dockerfile.agent
+      args:
+        AGENT_MODULE: agents.agent_amount.amount_anomaly_agent
+        AGENT_PORT: "8001"
+    env_file: .env
+    volumes:
+      - ./data:/data:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - swarm_net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  agent_frequency:
+    build:
+      context: .
+      dockerfile: agents/Dockerfile.agent
+      args:
+        AGENT_MODULE: agents.agent_frequency.frequency_zscore_agent
+        AGENT_PORT: "8002"
+    env_file: .env
+    volumes:
+      - ./data:/data:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - swarm_net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  agent_geolocation:
+    build:
+      context: .
+      dockerfile: agents/Dockerfile.agent
+      args:
+        AGENT_MODULE: agents.agent_geolocation.geolocation_velocity_agent
+        AGENT_PORT: "8003"
+    env_file: .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - swarm_net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  agent_device:
+    build:
+      context: .
+      dockerfile: agents/Dockerfile.agent
+      args:
+        AGENT_MODULE: agents.agent_device.device_profile_agent
+        AGENT_PORT: "8004"
+    env_file: .env
+    volumes:
+      - ./data:/data:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - swarm_net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  aggregator:
+    build:
+      context: .
+      dockerfile: aggregator/Dockerfile
+    env_file: .env
+    depends_on:
+      redis:
+        condition: service_healthy
+      agent_amount:
+        condition: service_started
+      agent_frequency:
+        condition: service_started
+      agent_geolocation:
+        condition: service_started
+      agent_device:
+        condition: service_started
+    networks:
+      - swarm_net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    env_file: .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+      aggregator:
+        condition: service_started
+    networks:
+      - swarm_net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    networks:
+      - swarm_net
+    depends_on:
+      - gateway
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+    volumes:
+      - ./monitoring/grafana_dashboard.json:/var/lib/grafana/dashboards/grafana_dashboard.json:ro
+    networks:
+      - swarm_net
+    depends_on:
+      - prometheus
+
+networks:
+  swarm_net:
+    driver: bridge
